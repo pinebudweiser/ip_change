@@ -27,6 +27,7 @@ public:
     }
     uint16_t Search(uint8_t* bytes, uint8_t bytesLen);
     uint16_t GetCheckSum();
+
 };
 
 #endif // MYTOOLS_H

@@ -94,6 +94,7 @@ int queue_processor(nfq_q_handle *CrtHandle, nfgenmsg *nfmsg,
                     inputFlow.init(ipHeader->ip_src.s_addr, ipHeader->ip_dst.s_addr,
                                    ntohs(tcpHeader->th_sport), ntohs(tcpHeader->th_dport));
                     inputFlow.reverse();
+                    temp = outputInstance.find(&inputFlow);
                     ipHeader->ip_src.s_addr = before_ip;
                 }
                 ipHeader->ip_sum = 0;

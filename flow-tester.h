@@ -35,10 +35,12 @@ public:
         if(arg1->src_ip_ == arg2->src_ip_) flag++;
         if(arg1->dst_port_ == arg2->dst_port_) flag++;
         if(arg1->src_port_ == arg2->src_port_) flag++;
-
         return flag & 4;
     }
-
+    bool operator <(FlowManager& arg1){ // test
+        if(this->dst_ip_ < arg1.dst_ip_) return true;
+        return false;
+    }
 };
 
 #endif // FLOWTESTER_H
