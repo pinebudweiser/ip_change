@@ -1,8 +1,11 @@
 #include <iostream>
+#include <set>
+#include <algorithm> // find_if
 #include <libnet.h>
 #include <linux/netfilter.h>
 #include <libnetfilter_queue/libnetfilter_queue.h>
 #include "my-tools.h"
+#include "flow-tester.h"
 
 #define MAX_PACKET      0xFFFF
 #define VERSION_IPV4	0x4
@@ -21,46 +24,81 @@ typedef struct libnet_ipv4_hdr IP;
 typedef struct libnet_tcp_hdr TCP;
 
 /* static */
-static char* before_ip;
-static char* after_ip;
+static uint32_t before_ip;
+static uint32_t after_ip;
+
 
 using namespace std;
 
+uint32_t str_to_ip(char* str)
+{
+    uint8_t arr[4];
+    uint32_t ipValue = 0;
+
+    sscanf(str,"%d.%d.%d.%d"
+           ,&arr[0],&arr[1],&arr[2],&arr[3]);
+    ipValue = (arr[0]<<24) + (arr[1]<<16) + (arr[2]<<8) + (arr[3]);
+
+    return ipValue;
+}
+
+
+set<FlowManager*> outputInstance;
+
 int queue_processor(nfq_q_handle *CrtHandle, nfgenmsg *nfmsg,
                      nfq_data *packet_handler, void *data){
-    uint32_t pktLen; // IP+TCP+HTTP, HTTP
-    int id;
+    uint8_t hookType; // 1 -> INPUT, 2 -> FORWARD, 3 -> OUTPUT
     uint8_t* packet;
+    uint32_t pktLen;
     IP* ipHeader;
     TCP* tcpHeader;
     nfqnl_msg_packet_hdr *packetHeader;
     MyTool binTool;
+    FlowManager* outputFlow; // malloc
+    FlowManager inputFlow; // only check
     PSEUDO_HEADER pse;
+    int id;
     uint8_t* my_packet = 0;
+    set<FlowManager*>::iterator temp;
+    uint32_t test_temp;
 
     packetHeader = nfq_get_msg_packet_hdr(packet_handler);
-    if (packetHeader)
+    if (packetHeader){
         id = ntohl(packetHeader->packet_id);
+        hookType = packetHeader->hook;
+    }
     pktLen = nfq_get_payload(packet_handler, &packet); // get packet - starting IP
     ipHeader = (IP*)(packet);
 
     if(ipHeader->ip_v == VERSION_IPV4){
-        ipHeader->ip_sum = 0;
-        printf("Dest ip = %s\n", inet_ntoa(ipHeader->ip_dst));
-        printf("before_ip = %s\n", before_ip);
-        if(inet_addr(inet_ntoa(ipHeader->ip_dst)) == inet_addr(before_ip))
-        {
-            inet_aton(after_ip, &(ipHeader->ip_dst));
-            printf("Change DestIP : %s\n", inet_ntoa(ipHeader->ip_dst));
-        }
-        binTool.init((uint8_t*)ipHeader,sizeof(IP)); // arg1 = index of data, arg2 = HTTP data size.
-        ipHeader->ip_sum = htons(binTool.GetCheckSum());
+       // ipHeader->ip_sum = 0;
+       // binTool.init((uint8_t*)ipHeader,sizeof(IP)); // index of data, HTTP data size.
+        //ipHeader->ip_sum = htons(binTool.GetCheckSum());
         switch(ipHeader->ip_p)
         {
             case IPPROTO_ICMP:
                 break;
             case IPPROTO_TCP:
+                ipHeader->ip_sum = 0;
                 tcpHeader = (TCP*)(packet+(ipHeader->ip_hl << 2));
+                if(hookType == 3 && (ipHeader->ip_dst.s_addr == before_ip)) // Output
+                {
+                    outputFlow = (FlowManager*)malloc(sizeof(FlowManager));
+                    outputFlow->init(ipHeader->ip_src.s_addr, ipHeader->ip_dst.s_addr,
+                                    ntohs(tcpHeader->th_sport), ntohs(tcpHeader->th_dport));
+                    outputInstance.insert(outputFlow);
+                    ipHeader->ip_dst.s_addr = after_ip; //change ip
+                }
+                if(hookType == 1 && (ipHeader->ip_src.s_addr == after_ip)) // Input
+                {
+                    inputFlow.init(ipHeader->ip_src.s_addr, ipHeader->ip_dst.s_addr,
+                                   ntohs(tcpHeader->th_sport), ntohs(tcpHeader->th_dport));
+                    inputFlow.reverse();
+                    ipHeader->ip_src.s_addr = before_ip;
+                }
+                ipHeader->ip_sum = 0;
+                binTool.init((uint8_t*)ipHeader,sizeof(IP)); // index of data, HTTP data size.
+                ipHeader->ip_sum = htons(binTool.GetCheckSum());
                 tcpHeader->th_sum = 0; // checksum init
                 /* set pseudo_header */
                 memcpy(pse.src_addr, &(ipHeader->ip_src), 4);
@@ -78,7 +116,6 @@ int queue_processor(nfq_q_handle *CrtHandle, nfgenmsg *nfmsg,
             case IPPROTO_UDP:
                 break;
         }
-
     }
     return nfq_set_verdict(CrtHandle, id, NF_ACCEPT, pktLen, packet);
 }
@@ -96,9 +133,8 @@ int main(int argc, char** argv)
         printf("Usage: ip_change <before_ip><change_ip>\n");
         return 0;
     }
-    before_ip = argv[1];
-    after_ip = argv[2];
-
+    before_ip = ntohl(str_to_ip(argv[1]));
+    after_ip = ntohl(str_to_ip(argv[2]));
 
     nfqOpenHandle = nfq_open();
     if (!nfqOpenHandle)
