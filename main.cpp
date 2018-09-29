@@ -11,6 +11,8 @@
 #define VERSION_IPV4	0x4
 #define HTTP_PORT		80
 
+using namespace std;
+
 /* nfq struct typedefing */
 typedef struct nfq_q_handle nfq_q_handle;
 typedef struct nfgenmsg nfgenmsg;
@@ -26,9 +28,7 @@ typedef struct libnet_tcp_hdr TCP;
 /* static */
 static uint32_t before_ip;
 static uint32_t after_ip;
-
-
-using namespace std;
+static set<FlowManager*> outputInstance;
 
 uint32_t str_to_ip(char* str)
 {
@@ -42,9 +42,6 @@ uint32_t str_to_ip(char* str)
     return ipValue;
 }
 
-
-set<FlowManager*> outputInstance;
-
 int queue_processor(nfq_q_handle *CrtHandle, nfgenmsg *nfmsg,
                      nfq_data *packet_handler, void *data){
     uint8_t hookType; // 1 -> INPUT, 2 -> FORWARD, 3 -> OUTPUT
@@ -54,13 +51,12 @@ int queue_processor(nfq_q_handle *CrtHandle, nfgenmsg *nfmsg,
     TCP* tcpHeader;
     nfqnl_msg_packet_hdr *packetHeader;
     MyTool binTool;
-    FlowManager* outputFlow; // malloc
-    FlowManager inputFlow; // only check
+    FlowManager inputFlow;
+    FlowManager* outputFlow;
     PSEUDO_HEADER pse;
     int id;
     uint8_t* my_packet = 0;
-    set<FlowManager*>::iterator temp;
-    uint32_t test_temp;
+    set<FlowManager*>::iterator flowIter;
 
     packetHeader = nfq_get_msg_packet_hdr(packet_handler);
     if (packetHeader){
@@ -71,9 +67,6 @@ int queue_processor(nfq_q_handle *CrtHandle, nfgenmsg *nfmsg,
     ipHeader = (IP*)(packet);
 
     if(ipHeader->ip_v == VERSION_IPV4){
-       // ipHeader->ip_sum = 0;
-       // binTool.init((uint8_t*)ipHeader,sizeof(IP)); // index of data, HTTP data size.
-        //ipHeader->ip_sum = htons(binTool.GetCheckSum());
         switch(ipHeader->ip_p)
         {
             case IPPROTO_ICMP:
@@ -91,11 +84,15 @@ int queue_processor(nfq_q_handle *CrtHandle, nfgenmsg *nfmsg,
                 }
                 if(hookType == 1 && (ipHeader->ip_src.s_addr == after_ip)) // Input
                 {
-                    inputFlow.init(ipHeader->ip_src.s_addr, ipHeader->ip_dst.s_addr,
+                    inputFlow.init(before_ip, ipHeader->ip_dst.s_addr,
                                    ntohs(tcpHeader->th_sport), ntohs(tcpHeader->th_dport));
                     inputFlow.reverse();
-                    temp = outputInstance.find(&inputFlow);
-                    ipHeader->ip_src.s_addr = before_ip;
+                    for(flowIter = outputInstance.begin(); flowIter != outputInstance.end(); flowIter++){
+                        if(inputFlow == *flowIter){
+                            ipHeader->ip_src.s_addr = before_ip;
+                            (*flowIter)->ChangeValue(true);
+                        }
+                    }
                 }
                 ipHeader->ip_sum = 0;
                 binTool.init((uint8_t*)ipHeader,sizeof(IP)); // index of data, HTTP data size.

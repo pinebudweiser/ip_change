@@ -29,6 +29,9 @@ public:
         this->src_port_ = temp.dst_port_;
         this->dst_port_ = temp.src_port_;
     }
+    void ChangeValue(bool is_change){
+        is_change_ = is_change;
+    }
     bool Same(FlowManager* arg1, FlowManager* arg2){
         uint8_t flag = 0;
         if(arg1->dst_ip_ == arg2->dst_ip_) flag++;
@@ -37,9 +40,15 @@ public:
         if(arg1->src_port_ == arg2->src_port_) flag++;
         return flag & 4;
     }
-    bool operator <(FlowManager& arg1){ // test
-        if(this->dst_ip_ < arg1.dst_ip_) return true;
-        return false;
+    bool operator ==(FlowManager* arg1){
+        uint8_t flag = 0;
+        if(this->dst_ip_ == arg1->dst_ip_) flag++;
+        if(this->src_ip_ == arg1->src_ip_) flag++;
+        if(this->dst_port_ == arg1->dst_port_) flag++;
+        if(this->src_port_ == arg1->src_port_) flag++;
+        if(this->is_change_ == arg1->is_change_) flag++;
+
+        return flag == 5 ? true : false;
     }
 };
 
